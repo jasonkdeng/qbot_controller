@@ -43,7 +43,7 @@ constexpr LegConfig FRONT_RIGHT{
     true,
     {18, 88.0f, +1, -20.0f, 20.0f},
     {19, 86.0f, -1, -80.0f, 80.0f},
-    {21, 94.0f, +1, 0.0f, 95.0f}};
+    {21, 95.0f, -1, 0.0f, 95.0f}};
 
 // Uncalibrated: replace each joint's pin, neutral, direction and limits before
 // enabling that leg. The 90-degree neutrals and +1 directions are placeholders.
