@@ -19,13 +19,22 @@ bool Joint::attach() {
 #ifdef ARDUINO
   servo_.setPeriodHertz(RobotConfig::SERVO_FREQUENCY_HZ);
   servo_.attach(pin_, RobotConfig::SERVO_MIN_US, RobotConfig::SERVO_MAX_US);
-#endif
+  attached_ = servo_.attached();
+#else
   attached_ = true;
-  return true;
+#endif
+  return attached_;
+}
+
+void Joint::detach() {
+#ifdef ARDUINO
+  servo_.detach();
+#endif
+  attached_ = false;
 }
 
 bool Joint::validate(float jointAngle, float &servoAngleOut) const {
-  if (!isConfigured()) {
+  if (!isConfigured() || !std::isfinite(jointAngle) || !std::isfinite(neutral_)) {
     return false;
   }
   if (jointAngle < minAngle_ || jointAngle > maxAngle_) {

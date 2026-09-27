@@ -31,7 +31,8 @@ bool Leg::attach() {
 }
 
 bool Leg::setFootPosition(float x, float y, float z) {
-  if (!enabled_ || !isFullyConfigured()) {
+  if (!enabled_ || !isFullyConfigured() ||
+      !hip_.isAttached() || !thigh_.isAttached() || !knee_.isAttached()) {
     return false;
   }
 

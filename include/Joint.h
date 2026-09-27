@@ -12,6 +12,7 @@ public:
 
   void configure(int pin, float neutral, int direction, float minAngle, float maxAngle);
   bool attach();
+  void detach();
   bool validate(float jointAngle, float &servoAngleOut) const;
   bool command(float jointAngle);
 
