@@ -602,4 +602,4 @@ A four-leg controller in PlatformIO where:
 - a safe static standing pose can be commanded
 - the codebase is ready for the first crawl gait
 
-Before changing code, inspect the existing PlatformIO project and map the current implementation against this context. Do not rewrite working pieces unnecessarily. Preserve proven behavior and refactor incrementally.
+Before changing code, inspect the existing PlatformIO project and map the current implementation against this context. Do not rewrite working pieces unnecessarily. Preserve proven behavior and refactor incrementally. 

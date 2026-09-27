@@ -3,7 +3,12 @@
 `src/calibration.cpp` is separate firmware controlled through Serial at 115200
 baud. The normal firmware still defaults to static stance. Calibration never
 edits `RobotConfig.h`: measurements live in RAM until you export and copy them.
-The existing front-right calibration remains unchanged.
+The existing front-right numeric neutral angles and directions are preserved.
+
+**Pulse mapping update:** every joint now has its own pulse endpoints, initially
+1000..2000 us. The numeric neutrals/directions are preserved but this remaps
+physical positions, so recheck them. The tool uses the shared `Joint` pulse
+calculation, rejects raw/joint/pulse violations, and exports both pulse endpoints.
 
 ## Build and connect
 
@@ -56,8 +61,9 @@ Reference: [Espressif ESP32 GPIO documentation](https://docs.espressif.com/proje
 
 ## Repeat for hip, thigh and knee
 
-1. **Establish a starting position.** `arm <raw-angle>` attaches the selected
-   servo and immediately commands that angle in the 0–180 degree range. Choose
+1. **Establish a starting position.** `arm <raw-angle>` validates the neutral and
+   target, attaches the selected servo, immediately writes its configured neutral,
+   then commands the requested angle within its current joint and pulse limits. Choose
    a known unobstructed starting position. If the installation is unknown,
    initially position the servo with the horn/linkage disconnected, then power
    down before installing the horn. Arming can cause a large movement.
@@ -77,8 +83,9 @@ Reference: [Espressif ESP32 GPIO documentation](https://docs.espressif.com/proje
    travel, stopping short of binding, collision or strain. Send `min` at the
    lowest mathematical angle and `max` at the highest. For a knee using the
    existing IK branch, mark `min` at straight (zero), then measure positive bend.
-   Raw steps intentionally allow exploration beyond previously loaded limits;
-   the tool cannot sense a mechanical stop. Never use the full 0–180 range as
+   Raw steps now respect the currently configured joint limits and pulse endpoints.
+   To expand a limit, explicitly update the config and rebuild after hardware
+   verification; this tool cannot sense a mechanical stop. Never use the full 0–180 range as
    a substitute for measuring safe mechanical travel.
 5. **Review.** `status` displays the calibration and which measurements are
    recorded. `zero` reports the saved raw neutral; approach it with `step`

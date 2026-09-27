@@ -1,54 +1,88 @@
-# Front-right 3D IK bench test
+﻿# Front-right servo and IK diagnostics
 
-This firmware uses only `RobotConfig::FRONT_RIGHT` and the existing shared IK.
-Keep the body supported and the foot clear of the bench. Other legs are never
-attached. Use external servo power with a common ESP32 ground.
+The `single_leg_ik` firmware uses the current front-right calibration from
+`RobotConfig.h`. It starts with PWM off. Keep the leg supported and use external
+servo power with a shared ESP32 ground.
 
 ```powershell
 pio run -e single_leg_ik -t upload --upload-port COM3
 pio device monitor -e single_leg_ik --port COM3
 ```
 
-PWM starts detached. Type `help` if you missed the startup message.
-Send commands individually, waiting for `Move complete` between moves.
+## Test individual joints first
 
-1. `check 0 0 20` prints hip/thigh/knee mathematical angles and raw servo commands
-   without attaching or moving anything. With the saved calibration (88/+1,
-   86/-1, 95/-1), expect joint angles near 0, -50.29, 79.97 degrees and raw
-   commands near 88, 136.29, 15.03 degrees. Verify these agree with the physical
-   calibration before arming.
-2. `arm` attaches all three front-right servos and immediately commands the
-   configured stance, currently `(0, 0, 20)` cm. This initial movement cannot be
-   interpolated from the actual pose because the robot has no position feedback.
-3. Test each Cartesian axis separately:
+The mapping now uses **1000..2000 us** per joint. Numeric angle neutrals are
+preserved, but their physical positions change with this narrower mapping.
+Recheck alignment before loading the leg or testing IK.
 
-   | Command | Expected foot motion |
-   | --- | --- |
-   | `move 1 0 20` | 1 cm forward |
-   | `move 0 0 20` | Back to starting pose |
-   | `move 0 1 20` | 1 cm outward; exercises hip roll |
-   | `move 0 0 20` | Back to starting pose |
-   | `move 0 0 19` | 1 cm upward, because +Z is down |
-   | `move 0 0 20` | Back to starting pose |
-   | `move 1 1 20` | Combined forward and outward |
-   | `move 0 0 20` | Back to starting pose |
+Send these individually, waiting for physical settling after each command:
 
-4. `off` detaches PWM and releases holding torque. Support the leg first.
-
-Positions are in cm from the hip roll axis, with +X forward, +Y outward, and +Z
-down. Each move takes two seconds, uses smoothstep Cartesian interpolation, and
-updates every 20 ms. Bench-test moves are limited to 3 cm from the last commanded
-position. The path is sampled before movement and every actual output is checked
-against joint and servo limits. Invalid targets are rejected without clamping.
-
-`stop` cancels interpolation and holds the last command. `status` reports the
-last commanded position, not measured feedback. `check 0 0 5` should reject an
-unreachable target without changing output. If motion is reversed or the foot
-does not follow the expected axis, stop and inspect calibration/mechanical
-alignment before increasing travel.
-
-The normal static-stance firmware remains the default build. Restore it with:
-
-```powershell
-pio run -e esp32_wroom -t upload --upload-port COM3
+```text
+arm
+joint thigh 0
+joint thigh -15
+joint thigh -30
+joint thigh 0
+joint thigh 15
+joint thigh 30
+joint thigh 0
+off
 ```
+
+`arm` only enables commands. A joint's first attachment writes its validated
+configured neutral immediately, then its requested target. `joint` controls only
+that joint; other outputs remain as they were. Use `off` before switching joints
+if you want only one servo attached. Direct joint commands invalidate the last
+Cartesian-position display because it no longer describes the command.
+
+Expected thigh diagnostic output with neutral 86, direction -1:
+
+| Joint angle | Raw angle | Pulse (us) |
+| --- | --- | --- |
+| -30 | 116 | 1644 |
+| -15 | 101 | 1561 |
+| 0 | 86 | 1477 |
+| 15 | 71 | 1394 |
+| 30 | 56 | 1311 |
+
+The integer mapping truncates fractional microseconds. Non-finite or out-of-limit
+commands are rejected, not clamped. Negative mathematical angles
+are valid only within that joint's range (for example, thigh -30 is valid).
+
+## Check IK without moving
+
+```text
+check 0 0 20
+```
+
+This prints requested XYZ, all joint/raw angles, all calculated pulses, and each
+joint's validation result. The 20 cm target is now **rejected**: thigh -50.29
+exceeds the temporary -45 degree minimum. The IK geometry was not changed.
+The normal controller also leaves PWM off when this startup pose is invalid.
+
+A target that passes the current mathematical limits is:
+
+```text
+check 0 0 22
+```
+
+Passing validation does not establish physical calibration or clearance. After
+individual tests and neutral checks, use the supported leg:
+
+```text
+arm
+move 0 0 22
+```
+
+Each `move` solves IK once, reports all outputs, validates every joint before any
+attachment/write, and sends one target through the Leg command path. There is no
+interpolation, smoothing, or gait. Check small changes before moving, such as
+`check 1 0 22` and `check 0 1 22`. Coordinates are cm from the hip roll axis:
++X forward, +Y outward, +Z downward. The physical travel path is not checked.
+
+`status` reports commanded state, not measured position. `stop` leaves the current
+target active; `off` detaches PWM and releases holding torque. Wait for physical
+settling between commands; the program cannot detect completion.
+
+See [SERVO_OUTPUT_SAFETY.md](SERVO_OUTPUT_SAFETY.md) for exact calibration, tests,
+and remaining attachment/power/mechanical limitations.
