@@ -1,75 +1,67 @@
-#include <Arduino.h>
+﻿#include <Arduino.h>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include "Kinematics.h"
+#include <limits>
 #include "Leg.h"
-#include "Motion.h"
 
 namespace {
 Leg leg("front-right", RobotConfig::FRONT_RIGHT.enabled);
-constexpr FootPosition HOME{RobotConfig::STANCE_X_CM, RobotConfig::STANCE_Y_CM,
-                            RobotConfig::STANCE_Z_CM};
-constexpr uint32_t MOVE_MS = 2000;
-constexpr float MAX_MOVE_CM = 3.0f;
 bool armed = false;
-bool moving = false;
-FootPosition start{}, target{};
-uint32_t started = 0, lastUpdate = 0;
+bool footPositionKnown = false;
 char line[96];
 size_t length = 0;
 bool overflow = false;
 
 void configure(JointType type, const RobotConfig::JointConfig &c) {
-  leg.configureJoint(type, c.pin, c.neutral, c.direction, c.minAngle, c.maxAngle);
+  leg.configureJoint(type, c.pin, c.neutral, c.direction, c.minAngle, c.maxAngle,
+                     c.minPulseUs, c.maxPulseUs);
 }
 
 void off() {
-  moving = false;
   leg.hip().detach(); leg.thigh().detach(); leg.knee().detach();
   armed = false;
+  footPositionKnown = false;
 }
 
-bool validate(FootPosition p, bool report) {
-  JointAngles a{};
+bool report(const char *name, const Joint &joint, float angle) {
+  const auto out = joint.calculate(angle);
+  Serial.printf("%-5s joint=%.2f servo=%.2f pulse=%d %s%s\n", name, angle,
+      out.servoAngle, out.pulseUs, out.valid() ? "OK" : "REJECTED: ",
+      out.valid() ? "" : out.error);
+  return out.valid();
+}
+
+bool calculate(FootPosition p, JointAngles &angles) {
+  Serial.printf("Target XYZ: %.2f %.2f %.2f\n", p.x, p.y, p.z);
   if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
-      !solveIK3D(p.x, p.y, p.z, a)) {
-    if (report) Serial.println("Rejected: outside IK workspace or non-finite target.");
+      !solveIK3D(p.x, p.y, p.z, angles)) {
+    Serial.println("IK REJECTED: invalid coordinate or unreachable target.");
+    Serial.println("hip   joint=N/A servo=N/A pulse=N/A REJECTED: no IK solution\n"
+                   "thigh joint=N/A servo=N/A pulse=N/A REJECTED: no IK solution\n"
+                   "knee  joint=N/A servo=N/A pulse=N/A REJECTED: no IK solution");
     return false;
   }
-  const float angles[] = {a.hip, a.thigh, a.knee};
-  const Joint *joints[] = {&leg.hip(), &leg.thigh(), &leg.knee()};
-  const char *names[] = {"hip", "thigh", "knee"};
-  bool valid = true;
-  for (int i = 0; i < 3; ++i) {
-    float raw = 0;
-    const bool ok = joints[i]->validate(angles[i], raw);
-    if (report) Serial.printf("%s joint=%.2f servo=%.2f %s\n", names[i], angles[i],
-        joints[i]->neutral() + joints[i]->direction() * angles[i], ok ? "OK" : "REJECTED");
-    valid = valid && ok;
-  }
-  return valid;
-}
-
-FootPosition interpolate(float s) {
-  return {start.x + (target.x - start.x) * s,
-          start.y + (target.y - start.y) * s,
-          start.z + (target.z - start.z) * s};
+  const bool hipOk = report("hip", leg.hip(), angles.hip);
+  const bool thighOk = report("thigh", leg.thigh(), angles.thigh);
+  const bool kneeOk = report("knee", leg.knee(), angles.knee);
+  return hipOk && thighOk && kneeOk;
 }
 
 void status() {
-  Serial.printf("PWM=%s moving=%s\n", armed ? "on" : "off", moving ? "yes" : "no");
-  if (armed) {
+  Serial.printf("Armed=%s; PWM hip/thigh/knee=%d/%d/%d\n", armed ? "yes" : "no",
+                leg.hip().isAttached(), leg.thigh().isAttached(), leg.knee().isAttached());
+  if (footPositionKnown) {
     const auto &p = leg.currentPosition();
-    Serial.printf("Last commanded XYZ: %.2f %.2f %.2f cm (not measured)\n", p.x, p.y, p.z);
-  }
+    Serial.printf("Last commanded XYZ: %.2f %.2f %.2f (not measured)\n", p.x, p.y, p.z);
+  } else Serial.println("No current Cartesian command (off or individual joint test).");
 }
 
 bool parseNumber(char *text, float &out) {
   if (!text) return false;
   char *end = nullptr;
   out = std::strtof(text, &end);
-  return end != text && *end == '\0' && std::isfinite(out);
+  return end != text && *end == '\0'; // calculate() reports non-finite values explicitly.
 }
 
 void execute(char *text) {
@@ -80,76 +72,80 @@ void execute(char *text) {
     if (!parseNumber(std::strtok(nullptr, " \t"), p.x) ||
         !parseNumber(std::strtok(nullptr, " \t"), p.y) ||
         !parseNumber(std::strtok(nullptr, " \t"), p.z) || std::strtok(nullptr, " \t")) {
-      Serial.println("Use check x y z or move x y z, in cm."); return;
+      Serial.println("Use check x y z or move x y z, in cm. Output unchanged."); return;
     }
-    if (!validate(p, true) || !std::strcmp(cmd, "check")) return;
-    if (!armed || moving) { Serial.println("Arm first; wait for completion or use stop."); return; }
-    start = leg.currentPosition(); target = p;
-    const float dx = p.x - start.x, dy = p.y - start.y, dz = p.z - start.z;
-    if (std::sqrt(dx * dx + dy * dy + dz * dz) > MAX_MOVE_CM) {
-      Serial.println("Rejected: use moves of at most 3 cm for this bench test."); return;
+    JointAngles angles{};
+    if (!calculate(p, angles)) { Serial.println("Target rejected; output unchanged."); return; }
+    if (!std::strcmp(cmd, "check")) return;
+    if (!armed) { Serial.println("Arm first; output unchanged."); return; }
+    // Full target validation above precedes attachment, including neutral output.
+    if (!leg.attach()) { Serial.println("Attach failed; target not commanded."); return; }
+    if (!leg.commandJointAngles(angles)) {
+      Serial.println("Target rejected; output unchanged."); return;
     }
-    for (int i = 0; i <= 100; ++i) {
-      if (!validate(interpolate(i / 100.0f), false)) {
-        Serial.println("Rejected: an intermediate position exceeds limits."); return;
-      }
+    leg.setCurrentPositionForMotion(p);
+    footPositionKnown = true;
+    Serial.println("Target commanded once. Wait for physical settling.");
+    return;
+  }
+  if (!std::strcmp(cmd, "joint")) {
+    char *name = std::strtok(nullptr, " \t");
+    float angle = 0;
+    if (!name || !parseNumber(std::strtok(nullptr, " \t"), angle) ||
+        std::strtok(nullptr, " \t")) {
+      Serial.println("Use joint hip|thigh|knee <mathematical degrees>."); return;
     }
-    started = lastUpdate = millis(); moving = true;
-    Serial.println("Moving over 2 seconds."); return;
+    Joint *joint = !std::strcmp(name, "hip") ? &leg.hip() :
+                   !std::strcmp(name, "thigh") ? &leg.thigh() :
+                   !std::strcmp(name, "knee") ? &leg.knee() : nullptr;
+    if (!joint) { Serial.println("Unknown joint; output unchanged."); return; }
+    if (!report(name, *joint, angle)) { Serial.println("Joint rejected; output unchanged."); return; }
+    if (!armed || !leg.isEnabled()) { Serial.println("Arm an enabled leg first; output unchanged."); return; }
+    if (!joint->attach() || !joint->command(angle)) {
+      Serial.println("Joint output failed."); return;
+    }
+    footPositionKnown = false;
+    Serial.println("Joint commanded once; other joint outputs unchanged."); return;
   }
   if (std::strtok(nullptr, " \t")) { Serial.println("Unexpected argument."); return; }
   if (!std::strcmp(cmd, "help")) {
-    Serial.println("check x y z | arm | move x y z | stop | off | status\n"
-                   "Local cm: +X forward, +Y outward, +Z down from hip axis.\n"
-                   "arm immediately commands the configured stance. Support the leg.\n"
-                   "stop holds the last command; off releases PWM/holding torque.");
+    Serial.println("check x y z | arm | move x y z | joint hip|thigh|knee angle | stop | off | status\n"
+                   "Local cm: +X forward, +Y outward, +Z down.\n"
+                   "arm enables commands only. First attach writes configured neutral, then target.\n"
+                   "joint uses mathematical degrees; try thigh -30, -15, 0, 15, 30 individually.\n"
+                   "No interpolation. stop holds the current target; off releases PWM.\n"
+                   "Pulse endpoints remap physical angles: recheck neutral with the leg supported.");
   } else if (!std::strcmp(cmd, "arm")) {
-    if (armed) { Serial.println("Already armed."); return; }
-    if (!validate(HOME, true)) return;
-    if (!leg.attach() || !leg.setFootPosition(HOME.x, HOME.y, HOME.z)) {
-      off(); Serial.println("Arming failed; PWM detached."); return;
-    }
-    armed = true; status();
-  } else if (!std::strcmp(cmd, "stop")) {
-    moving = false; status();
+    armed = leg.isEnabled(); status();
   } else if (!std::strcmp(cmd, "off")) {
     off(); status();
+  } else if (!std::strcmp(cmd, "stop")) {
+    Serial.println("No trajectory; current targets remain active. off releases PWM.");
   } else if (!std::strcmp(cmd, "status")) status();
   else Serial.println("Unknown command; use help.");
 }
-} // namespace
+}
 
 void setup() {
   Serial.begin(115200);
   configure(JointType::Hip, RobotConfig::FRONT_RIGHT.hip);
   configure(JointType::Thigh, RobotConfig::FRONT_RIGHT.thigh);
   configure(JointType::Knee, RobotConfig::FRONT_RIGHT.knee);
-  Serial.println("Front-right 3D IK test. PWM off. Type help.");
+  Serial.println("Front-right bounded servo diagnostics. PWM off. Type help.");
 }
 
 void loop() {
-  // Bound serial work so motion updates cannot be starved by continuous input.
   for (int n = 0; n < 96 && Serial.available(); ++n) {
     const char c = static_cast<char>(Serial.read());
     if (c == '\r' || c == '\n') {
       if (overflow) Serial.println("Line too long; discarded.");
       else if (length) { line[length] = '\0'; execute(line); }
       length = 0; overflow = false;
+    } else if (c == '\b' || c == 127) {
+      if (!overflow && length) --length;
     } else if (!overflow) {
       if (length < sizeof(line) - 1) line[length++] = c;
       else overflow = true;
     }
-  }
-  const uint32_t now = millis();
-  if (!moving || now - lastUpdate < RobotConfig::MOTION_UPDATE_MS) return;
-  lastUpdate = now;
-  const uint32_t elapsed = now - started;
-  const FootPosition p = elapsed >= MOVE_MS ? target :
-      interpolate(smoothstep01(static_cast<float>(elapsed) / MOVE_MS));
-  if (!validate(p, false) || !leg.setFootPosition(p.x, p.y, p.z)) {
-    moving = false;
-    Serial.println("Motion stopped: target rejected; holding last command.");
-  } else if (elapsed >= MOVE_MS) {
-    moving = false; Serial.println("Move complete."); status();
   }
 }
