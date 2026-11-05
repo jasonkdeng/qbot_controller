@@ -9,23 +9,24 @@ static bool near(float a, float b, float eps = 0.001f) { return std::fabs(a-b) <
 
 int main() {
   Joint j;
-  j.configure(1, 90.0f, +1, -20.0f, 20.0f);
+  j.configure(1, 90.0f, +1, -20.0f, 20.0f, 1000, 2000);
   float servoAngle = 0.0f;
-  assert(j.validate(10.0f, servoAngle));
+  int pulseUs = 0;
+  assert(j.validate(10.0f, servoAngle, pulseUs));
   assert(near(servoAngle, 100.0f));
 
-  j.configure(1, 90.0f, -1, -20.0f, 20.0f);
-  assert(j.validate(10.0f, servoAngle));
+  j.configure(1, 90.0f, -1, -20.0f, 20.0f, 1000, 2000);
+  assert(j.validate(10.0f, servoAngle, pulseUs));
   assert(near(servoAngle, 80.0f));
-  assert(!j.validate(25.0f, servoAngle));
+  assert(!j.validate(25.0f, servoAngle, pulseUs));
 
-  j.configure(1, 170.0f, +1, -20.0f, 20.0f);
-  assert(!j.validate(20.0f, servoAngle));
+  j.configure(1, 170.0f, +1, -20.0f, 20.0f, 1000, 2000);
+  assert(!j.validate(20.0f, servoAngle, pulseUs));
 
   Leg disabled("placeholder", false);
-  disabled.configureJoint(JointType::Hip, -1, 90, +1, -20, 20);
-  disabled.configureJoint(JointType::Thigh, -1, 90, +1, -80, 80);
-  disabled.configureJoint(JointType::Knee, -1, 90, +1, 0, 95);
+  disabled.configureJoint(JointType::Hip, -1, 90, +1, -20, 20, 1000, 2000);
+  disabled.configureJoint(JointType::Thigh, -1, 90, +1, -80, 80, 1000, 2000);
+  disabled.configureJoint(JointType::Knee, -1, 90, +1, 0, 95, 1000, 2000);
   assert(!disabled.attach());
   assert(!disabled.setFootPosition(0,0,17));
 
