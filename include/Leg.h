@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Joint.h"
+#include "Kinematics.h"
 
 #include <cstdint>
 
@@ -29,9 +30,10 @@ public:
   explicit Leg(const char *name = "leg", bool enabled = true);
 
   void configureJoint(JointType type, int pin, float neutral, int direction,
-                      float minAngle, float maxAngle);
+                      float minAngle, float maxAngle, int minPulseUs, int maxPulseUs);
   bool attach();
   bool setFootPosition(float x, float y, float z);
+  bool commandJointAngles(const JointAngles &angles);
 
   bool isEnabled() const { return enabled_; }
   void setEnabled(bool enabled) { enabled_ = enabled; }
