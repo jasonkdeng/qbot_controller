@@ -53,21 +53,21 @@ constexpr LegConfig FRONT_RIGHT{
 // enabling that leg. The 90-degree neutrals and +1 directions are placeholders.
 constexpr LegConfig FRONT_LEFT{
     false,
-    {UNASSIGNED_PIN, 90.0f, +1, -20.0f, 20.0f, 1000, 2000}, // needs fixing
-    {UNASSIGNED_PIN, 96.0f, +1, -45.0f, 45.0f, 1000, 2000},
-    {UNASSIGNED_PIN, 92.0f, -1, 0.0f, 80.0f, 1000, 2000}};
+    {25, 85.0f, +1, -20.0f, 20.0f, 1000, 2000},
+    {26, 96.0f, +1, -45.0f, 45.0f, 1000, 2000},
+    {27, 92.0f, -1, 0.0f, 80.0f, 1000, 2000}};
 
 constexpr LegConfig REAR_RIGHT{
     false,
-    {UNASSIGNED_PIN, 80.0f, -1, -20.0f, 20.0f, 1000, 2000},
-    {UNASSIGNED_PIN, 88.0f, -1, -45.0f, 45.0f, 1000, 2000},
-    {UNASSIGNED_PIN, 93.0f, +1, 0.0f, 80.0f, 1000, 2000}};
+    {32, 80.0f, -1, -20.0f, 20.0f, 1000, 2000},
+    {33, 88.0f, -1, -45.0f, 45.0f, 1000, 2000},
+    {23, 93.0f, +1, 0.0f, 80.0f, 1000, 2000}};
 
 constexpr LegConfig REAR_LEFT{
     false,
-    {UNASSIGNED_PIN, 96.0f, +1, -20.0f, 20.0f, 1000, 2000},
-    {UNASSIGNED_PIN, 80.0f, +1, -45.0f, 45.0f, 1000, 2000},
-    {UNASSIGNED_PIN, 93.0f, -1, 0.0f, 80.0f, 1000, 2000}};
+    {13, 96.0f, +1, -20.0f, 20.0f, 1000, 2000},
+    {14, 80.0f, +1, -45.0f, 45.0f, 1000, 2000},
+    {22, 93.0f, -1, 0.0f, 80.0f, 1000, 2000}};
 
 // Local foot target in cm from the hip roll axis.
 constexpr float STANCE_X_CM = 0.0f;
