@@ -20,7 +20,7 @@ constexpr FootPosition START_STANCE{RobotConfig::STANCE_X_CM,
 
 void configureJoint(Leg &leg, JointType type, const RobotConfig::JointConfig &config) {
   leg.configureJoint(type, config.pin, config.neutral, config.direction,
-                     config.minAngle, config.maxAngle);
+                     config.minAngle, config.maxAngle, config.minPulseUs, config.maxPulseUs);
 }
 
 void configureLeg(Leg &leg, const RobotConfig::LegConfig &config) {
@@ -40,6 +40,16 @@ void configureRobot() {
 void attachEnabledLegs() {
   for (Leg *leg : allLegs) {
     if (!leg->isEnabled()) {
+      continue;
+    }
+    // Reject an invalid startup pose before attachment writes any neutral PWM.
+    JointAngles angles{};
+    if (!solveIK3D(START_STANCE.x, START_STANCE.y, START_STANCE.z, angles) ||
+        !leg->hip().calculate(angles.hip).valid() ||
+        !leg->thigh().calculate(angles.thigh).valid() ||
+        !leg->knee().calculate(angles.knee).valid()) {
+      Serial.print("Startup stance invalid; PWM left off for: ");
+      Serial.println(leg->name());
       continue;
     }
     if (!leg->attach()) {
