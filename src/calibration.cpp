@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "RobotConfig.h"
+#include "Joint.h"
 
 // Standalone firmware: build/upload with `pio run -e leg_calibration -t upload`.
 // Nothing attaches until an explicit `arm <raw-degrees>` command.
@@ -59,11 +60,29 @@ bool number(const char *text, float &value) {
   return end != text && *end == '\0' && std::isfinite(value);
 }
 
-void writeRaw(float angle) {
-  rawAngle = angle;
-  const int pulse = static_cast<int>(RobotConfig::SERVO_MIN_US +
-      angle / 180.0f * (RobotConfig::SERVO_MAX_US - RobotConfig::SERVO_MIN_US));
+bool previewRaw(float angle, int &pulse) {
+  const auto &c = joints[selectedJoint].config;
+  if ((c.direction != 1 && c.direction != -1) || !std::isfinite(c.neutral) ||
+      c.neutral < 0 || c.neutral > 180 || !std::isfinite(c.minAngle) ||
+      !std::isfinite(c.maxAngle) || c.minAngle > 0 || c.maxAngle < 0)
+    return false;
+  const float jointAngle = (angle - c.neutral) / c.direction;
+  return jointAngle >= c.minAngle && jointAngle <= c.maxAngle &&
+      Joint::calculatePulse(angle, c.minPulseUs, c.maxPulseUs, pulse);
+}
+
+bool writeRaw(float angle) {
+  int pulse = -1;
+  if (!previewRaw(angle, pulse)) {
+    Serial.println("REJECTED: raw/joint/pulse limit or invalid calibration; output unchanged.");
+    return false;
+  }
   servo.writeMicroseconds(pulse);
+  rawAngle = angle;
+  const auto &c = joints[selectedJoint].config;
+  Serial.printf("%s joint=%.2f servo=%.2f pulse=%d OK\n", JOINT_NAMES[selectedJoint],
+                (angle - c.neutral) / c.direction, angle, pulse);
+  return true;
 }
 
 void status() {
@@ -75,10 +94,11 @@ void status() {
                 JOINT_NAMES[selectedJoint], servo.attached() ? "on" : "off");
   for (int i = 0; i < 3; ++i) {
     const Calibration &j = joints[i];
-    Serial.printf("%s: pin=%d neutral=%.2f direction=%d limits=[%.2f, %.2f] "
+    Serial.printf("%s: pin=%d neutral=%.2f direction=%d limits=[%.2f, %.2f] pulse=[%d, %d] "
                   "marked neutral/direction/min/max=%d/%d/%d/%d\n",
                   JOINT_NAMES[i], j.config.pin, j.config.neutral, j.config.direction,
                   j.config.minAngle, j.config.maxAngle,
+                  j.config.minPulseUs, j.config.maxPulseUs,
                   j.neutralSet, j.directionSet, j.minSet, j.maxSet);
   }
   if (servo.attached()) Serial.printf("Current raw command: %.2f degrees\n", rawAngle);
@@ -88,10 +108,13 @@ bool complete(const Calibration &j) {
   const auto &c = j.config;
   const float rawMin = c.neutral + c.direction * c.minAngle;
   const float rawMax = c.neutral + c.direction * c.maxAngle;
+  int pulse = -1;
   return j.neutralSet && j.directionSet && j.minSet && j.maxSet &&
       c.pin >= 0 && c.minAngle <= 0 && c.maxAngle >= 0 &&
       c.minAngle < c.maxAngle && rawMin >= 0 && rawMin <= 180 &&
-      rawMax >= 0 && rawMax <= 180;
+      rawMax >= 0 && rawMax <= 180 &&
+      Joint::calculatePulse(rawMin, c.minPulseUs, c.maxPulseUs, pulse) &&
+      Joint::calculatePulse(rawMax, c.minPulseUs, c.maxPulseUs, pulse);
 }
 
 void exportConfig() {
@@ -105,8 +128,9 @@ void exportConfig() {
                 LEG_NAMES[selectedLeg]);
   for (int i = 0; i < 3; ++i) {
     const auto &c = joints[i].config;
-    Serial.printf("    {%d, %.2ff, %+d, %.2ff, %.2ff}%s\n", c.pin, c.neutral,
-                  c.direction, c.minAngle, c.maxAngle, i == 2 ? "};" : ",");
+    Serial.printf("    {%d, %.2ff, %+d, %.2ff, %.2ff, %d, %d}%s\n", c.pin, c.neutral,
+                  c.direction, c.minAngle, c.maxAngle, c.minPulseUs, c.maxPulseUs,
+                  i == 2 ? "};" : ",");
   }
 }
 
@@ -167,9 +191,14 @@ void execute(char *input) {
     if (servo.attached() || j.config.pin < 0 || !number(arg, value) || value < 0 || value > 180) {
       Serial.println("Assign pin first; detach before arm <0..180>."); return;
     }
+    int neutralPulse = -1, targetPulse = -1;
+    if (!previewRaw(j.config.neutral, neutralPulse) || !previewRaw(value, targetPulse)) {
+      Serial.println("Arm rejected: neutral or target invalid; PWM remains off."); return;
+    }
     servo.setPeriodHertz(RobotConfig::SERVO_FREQUENCY_HZ);
-    servo.attach(j.config.pin, RobotConfig::SERVO_MIN_US, RobotConfig::SERVO_MAX_US);
+    servo.attach(j.config.pin, j.config.minPulseUs, j.config.maxPulseUs);
     if (!servo.attached()) { Serial.println("Attach failed."); return; }
+    servo.writeMicroseconds(neutralPulse);
     writeRaw(value);
   } else if (!std::strcmp(cmd, "direction")) {
     if (!number(arg, value) || (value != 1 && value != -1)) {
